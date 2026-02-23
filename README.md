@@ -29,3 +29,41 @@ cd ..
 
 ## Usage
 We provide a example using single-core, multithreading, multiprocessing implementation to evaluate the availability of the topology Germany_17. See the [example.py](example.py).
+
+
+## Directed system symbolic availability function
+You can now generate a symbolic availability function (instead of a numeric value) for directed systems with uni-directional and bi-directional edges.
+
+```python
+from availability_evaluation import (
+    build_directed_graph_from_topology,
+    availability_function_for_directed_system,
+)
+
+topology = {
+    "nodes": [
+        {"id": "source", "weight": 1},
+        {"id": "n1", "weight": 2},
+        {"id": "n2", "weight": 1},
+        {"id": "sink", "weight": 1},
+    ],
+    "edges": [
+        {"source": "source", "target": "n1", "bidirectional": False},
+        {"source": "source", "target": "n2", "bidirectional": False},
+        {"source": "n1", "target": "sink", "bidirectional": False},
+        {"source": "n2", "target": "sink", "bidirectional": False},
+    ],
+}
+
+G = build_directed_graph_from_topology(topology)
+expr = availability_function_for_directed_system(G, source="source", sink="sink")
+print(expr)
+```
+
+Output example:
+
+```text
+1 - (((1 - (A_n1^2)) * (1 - A_n2)))
+```
+
+Where each node availability variable is `A_<id>`. Node `weight` is used as a k-factor exponent (`A_<id>^weight`).
