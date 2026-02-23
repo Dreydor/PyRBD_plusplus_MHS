@@ -68,7 +68,7 @@ def optimized_minimalcuts(H, src_, dst_, order=6):
             
             # find all true columns index
             all_true_index = np.all(indices_current, axis=0)
-            all_true = [indices_current_col[j] for j, is_true in enumerate(all_true_index) if is_true]
+            all_true = [indices_columns_current[j] for j, is_true in enumerate(all_true_index) if is_true]
 
             # add all true columns to minimal cut sets
             for elem in all_true:
@@ -88,6 +88,9 @@ def optimized_minimalcuts(H, src_, dst_, order=6):
             
             # finding all the upper sets of the current minimal cut sets
             for tup in minimal:
+
+                if isinstance(tup, int):
+                    tup = (tup,)
 
                 # put the current minimal cut set into a set
                 tupset = set(tup)
@@ -112,7 +115,7 @@ def optimized_minimalcuts(H, src_, dst_, order=6):
 
             # create the new incidence matrix, columns are new pairs, rows are paths
             indices_current = np.zeros([len(paths), len(newpairs)], dtype=bool)
-            indices_current_col = newpairs
+            indices_columns_current = newpairs
             
             # set the value of the new incidence matrix according to the original incidence matrix for each new pair
             for j, nodes in enumerate(newpairs):
@@ -139,7 +142,7 @@ def optimized_minimalcuts(H, src_, dst_, order=6):
                 indices_current[:, j] = np.any(indices_origin[:, indices_tmp], axis=1)
     
     # convert the minimal cut sets to list of lists
-    minimal = [list(i) for i in minimal]
+    minimal = [list(i) if not isinstance(i, int) else [i] for i in minimal]
 
     # sort the minimal cut sets by length and lexicographically
     minimal = sorted(minimal, key=lambda x: (len(x), x))

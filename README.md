@@ -29,3 +29,32 @@ cd ..
 
 ## Usage
 We provide a example using single-core, multithreading, multiprocessing implementation to evaluate the availability of the topology Germany_17. See the [example.py](example.py).
+
+### Directed topology support
+PyRBD++ also supports directed systems (including cyclic loops) with mixed uni-/bi-directional links.
+
+Each node in the topology may contain:
+- `id`: node identifier
+- `weight`: k-factor used in node availability transformation
+- `virtual` (optional): if `true`, node is considered 100% reliable (useful for source/sink)
+
+Each edge contains:
+- `source`, `target`
+- `direction`: `uni` or `bi`
+
+Use `calculate_directed_system_availability(topology, source, sink, node_availability)`.
+
+To obtain the **availability/reliability function** (instead of a single calculated value), use:
+
+`build_directed_system_availability_function(topology, source, sink)`
+
+This returns a dictionary containing:
+- `expression`: a symbolic formula that can be implemented in BI tooling (e.g., PowerBI)
+- `symbols`: mapping of each non-virtual node id to its base availability symbol (`A_<id>`)
+- `weighted_symbols`: each node's effective availability term after applying the node `weight`
+
+For non-virtual nodes, weighted availability is computed as:
+
+`A_eff = 1 - (1 - A)^k`
+
+where `A` is the base node availability and `k` is the node `weight`.
