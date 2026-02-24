@@ -106,13 +106,33 @@ def availability_function_for_directed_system(
 
 # Load data from a pickle file
 def read_graph(directory, top):
-    with open(os.path.join(directory, 'Pickle_' + top + '.pickle'), 'rb') as handle:
-        f = pkl.load(handle)
-    G = f[0]
-    pos = f[1]
-    lable = f[2]
+    """Load graph payload from pickle.
 
-    return G, pos, lable
+    Supported pickle formats:
+    1) Legacy tuple/list: (graph, pos, label)
+    2) Direct graph object
+    3) Directed-topology dict: {"nodes": ..., "edges": ...}
+    """
+    with open(os.path.join(directory, 'Pickle_' + top + '.pickle'), 'rb') as handle:
+        payload = pkl.load(handle)
+
+    # Legacy format: [G, pos, label]
+    if isinstance(payload, (list, tuple)) and len(payload) >= 3:
+        return payload[0], payload[1], payload[2]
+
+    # Newer format: topology dictionary
+    if isinstance(payload, dict) and 'nodes' in payload and 'edges' in payload:
+        graph = build_directed_graph_from_topology(payload)
+        return graph, None, None
+
+    # Fallback: graph-only payload
+    if hasattr(payload, 'nodes') and hasattr(payload, 'edges'):
+        return payload, None, None
+
+    raise ValueError(
+        f"Unsupported topology pickle format for '{top}'. "
+        "Expected (graph, pos, label), graph object, or topology dict with 'nodes'/'edges'."
+    )
 
 # Relabel the nodes of G and A_dic
 def relabel_graph_A_dict(G, A_dic):
