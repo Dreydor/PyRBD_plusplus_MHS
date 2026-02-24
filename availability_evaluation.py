@@ -5,7 +5,7 @@ import os
 import pickle as pkl
 import networkx as nx
 from itertools import combinations
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 try:
     import build.rbd_bindings
 except ModuleNotFoundError:
@@ -17,25 +17,24 @@ from cutsets import optimized_minimalcuts
 def build_directed_graph_from_topology(topology: dict) -> nx.DiGraph:
     """Build a directed graph from a topology payload.
 
-    Expected node format:
-      {"id": "A", "weight": 2, "is_input": False, "is_output": False}
+    Expected format:
+    {
+        "nodes": [{"id": "A", "weight": 2}, ...],
+        "edges": [
+            {"source": "source", "target": "A", "bidirectional": false},
+            {"source": "A", "target": "B", "bidirectional": true}
+        ]
+    }
 
-    Expected edge format:
-      {"source": "A", "target": "B", "bidirectional": False}
-
-    ``weight`` is preserved for k-factor usage in symbolic availability,
-    ``is_input`` and ``is_output`` define start/end node sets.
+    The ``weight`` node attribute is preserved and later used as a k-factor
+    exponent in symbolic availability functions.
     """
     graph = nx.DiGraph()
 
     for node in topology.get("nodes", []):
         node_id = node["id"]
-        graph.add_node(
-            node_id,
-            weight=node.get("weight", 1),
-            is_input=bool(node.get("is_input", False)),
-            is_output=bool(node.get("is_output", False)),
-        )
+        node_weight = node.get("weight", 1)
+        graph.add_node(node_id, weight=node_weight)
 
     for edge in topology.get("edges", []):
         source = edge["source"]
@@ -46,41 +45,6 @@ def build_directed_graph_from_topology(topology: dict) -> nx.DiGraph:
 
     return graph
 
-
-
-
-def _derive_terminal_nodes(graph: nx.DiGraph) -> Tuple[List[str], List[str]]:
-    input_nodes = [n for n, data in graph.nodes(data=True) if data.get("is_input", False)]
-    output_nodes = [n for n, data in graph.nodes(data=True) if data.get("is_output", False)]
-
-    if not input_nodes:
-        raise ValueError("No input nodes found. Mark at least one node with is_input=True.")
-    if not output_nodes:
-        raise ValueError("No output nodes found. Mark at least one node with is_output=True.")
-
-    return input_nodes, output_nodes
-
-
-def _augment_graph_with_parallel_terminals(graph: nx.DiGraph) -> Tuple[nx.DiGraph, str, str]:
-    input_nodes, output_nodes = _derive_terminal_nodes(graph)
-
-    augmented = graph.copy()
-    super_source = "__virtual_input__"
-    super_sink = "__virtual_output__"
-
-    while super_source in augmented or super_sink in augmented:
-        super_source = f"_{super_source}"
-        super_sink = f"_{super_sink}"
-
-    augmented.add_node(super_source, weight=1, is_input=False, is_output=False)
-    augmented.add_node(super_sink, weight=1, is_input=False, is_output=False)
-
-    for node in input_nodes:
-        augmented.add_edge(super_source, node)
-    for node in output_nodes:
-        augmented.add_edge(node, super_sink)
-
-    return augmented, super_source, super_sink
 
 def _component_unavailability_symbol(node: str, weight: float) -> str:
     """Return unavailability symbol with weighted k-factor.
@@ -96,77 +60,47 @@ def _component_unavailability_symbol(node: str, weight: float) -> str:
 
 
 def _inclusion_exclusion_terms(minimal_cutsets: List[List[str]], node_weights: Dict[str, float]) -> List[str]:
-    """Build inclusion-exclusion polynomial terms for union of minimal cut-set failures.
-
-    Terms that collapse to the same node product are coefficient-combined.
-    """
-    coefficients: Dict[Tuple[str, ...], int] = {}
+    """Build inclusion-exclusion polynomial terms for union of minimal cut-set failures."""
+    terms = []
     cutset_count = len(minimal_cutsets)
 
     for r in range(1, cutset_count + 1):
-        sign = 1 if r % 2 == 1 else -1
+        sign = " + " if r % 2 == 1 else " - "
         for selected in combinations(minimal_cutsets, r):
-            merged_nodes = tuple(sorted({node for cutset in selected for node in cutset}))
-            coefficients[merged_nodes] = coefficients.get(merged_nodes, 0) + sign
-
-    terms = []
-    for merged_nodes, coeff in sorted(coefficients.items(), key=lambda x: (len(x[0]), x[0])):
-        if coeff == 0:
-            continue
-        node_terms = [_component_unavailability_symbol(node, node_weights.get(node, 1)) for node in merged_nodes]
-        product = f"({' * '.join(node_terms)})"
-        abs_coeff = abs(coeff)
-        coeff_prefix = "" if abs_coeff == 1 else f"{abs_coeff} * "
-        sign_prefix = " + " if coeff > 0 else " - "
-        terms.append(f"{sign_prefix}{coeff_prefix}{product}")
+            merged_nodes = sorted({node for cutset in selected for node in cutset})
+            node_terms = [_component_unavailability_symbol(node, node_weights.get(node, 1)) for node in merged_nodes]
+            terms.append(f"{sign}({' * '.join(node_terms)})")
 
     return terms
 
 
 def availability_function_for_directed_system(
     graph: nx.DiGraph,
-    source: Optional[str] = None,
-    sink: Optional[str] = None,
+    source: str,
+    sink: str,
     node_weights: Dict[str, float] = None,
 ) -> str:
     """Return a symbolic availability function for a directed system.
 
-    Preferred mode uses node attributes ``is_input`` and ``is_output``.
-    All inputs are treated in parallel as system starts, all outputs in
-    parallel as system ends. ``source``/``sink`` are still accepted for
-    backward compatibility.
+    The returned expression uses inclusion-exclusion over minimal cut sets.
+    Source and sink are treated as virtual (100% reliable), therefore excluded
+    from cut sets and the final function.
     """
     if node_weights is None:
         node_weights = {node: graph.nodes[node].get("weight", 1) for node in graph.nodes}
 
-    if source is None or sink is None:
-        eval_graph, source, sink = _augment_graph_with_parallel_terminals(graph)
-        excluded_nodes = {source, sink}
-    else:
-        eval_graph = graph
-        excluded_nodes = {source, sink}
-
-    minimal_cutsets = optimized_minimalcuts(eval_graph, source, sink)
+    minimal_cutsets = optimized_minimalcuts(graph, source, sink)
     filtered_cutsets = [
-        [node for node in cutset if node not in excluded_nodes]
+        [node for node in cutset if node not in {source, sink}]
         for cutset in minimal_cutsets
         if set(cutset) != {source} and set(cutset) != {sink}
     ]
     filtered_cutsets = [cutset for cutset in filtered_cutsets if cutset]
 
-    # Remove duplicate cut sets that can appear after terminal augmentation
-    seen = set()
-    unique_cutsets = []
-    for cutset in filtered_cutsets:
-        key = tuple(sorted(cutset))
-        if key not in seen:
-            seen.add(key)
-            unique_cutsets.append(list(key))
-
-    if not unique_cutsets:
+    if not filtered_cutsets:
         return "1"
 
-    union_failure_terms = _inclusion_exclusion_terms(unique_cutsets, node_weights)
+    union_failure_terms = _inclusion_exclusion_terms(filtered_cutsets, node_weights)
     union_failure = "".join(union_failure_terms).lstrip(" + ")
     return f"1 - ({union_failure})"
 

@@ -42,28 +42,28 @@ from availability_evaluation import (
 
 topology = {
     "nodes": [
-        {"id": "n1", "weight": 2, "is_input": True, "is_output": False},
-        {"id": "n2", "weight": 1, "is_input": True, "is_output": False},
-        {"id": "n3", "weight": 1, "is_input": False, "is_output": True},
-        {"id": "n4", "weight": 1, "is_input": False, "is_output": True},
+        {"id": "source", "weight": 1},
+        {"id": "n1", "weight": 2},
+        {"id": "n2", "weight": 1},
+        {"id": "sink", "weight": 1},
     ],
     "edges": [
-        {"source": "n1", "target": "n3", "bidirectional": False},
-        {"source": "n2", "target": "n4", "bidirectional": False},
+        {"source": "source", "target": "n1", "bidirectional": False},
+        {"source": "source", "target": "n2", "bidirectional": False},
+        {"source": "n1", "target": "sink", "bidirectional": False},
+        {"source": "n2", "target": "sink", "bidirectional": False},
     ],
 }
 
 G = build_directed_graph_from_topology(topology)
-expr = availability_function_for_directed_system(G)
+expr = availability_function_for_directed_system(G, source="source", sink="sink")
 print(expr)
 ```
 
-Output example (depends on topology structure):
+Output example:
 
 ```text
-1 - ((...))
+1 - (((1 - (A_n1^2)) * (1 - A_n2)))
 ```
 
 Where each node availability variable is `A_<id>`. Node `weight` is used as a k-factor exponent (`A_<id>^weight`).
-
-Inputs and outputs are defined per-node using `is_input`/`is_output`. All input nodes are treated in parallel as system starts, and all output nodes are treated in parallel as system ends.
